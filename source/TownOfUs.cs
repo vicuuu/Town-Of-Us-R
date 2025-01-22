@@ -124,6 +124,9 @@ namespace TownOfUs
 
         private Harmony _harmony;
 
+        public static TownOfUs Instance;
+        internal static BepInEx.Logging.ManualLogSource Logger;
+
         public static ConfigEntry<bool> DeadSeeGhosts { get; set; }
 
         public static string RuntimeLocation;
@@ -131,6 +134,8 @@ namespace TownOfUs
         public override void Load()
         {
             RuntimeLocation = Path.GetDirectoryName(Assembly.GetAssembly(typeof(TownOfUs)).Location);
+            Logger = Log;
+            Instance = this;
             ReactorCredits.Register<TownOfUs>(ReactorCredits.AlwaysShow);
             System.Console.WriteLine("000.000.000.000/000000000000000000");
 
@@ -222,6 +227,9 @@ namespace TownOfUs
             ZoomPlusActiveButton = CreateSprite("TownOfUs.Resources.PlusActive.png");
             ZoomMinusActiveButton = CreateSprite("TownOfUs.Resources.MinusActive.png");
 
+            // Custom skin loader
+            CustomHats.CustomHatManager.LoadHats();
+
             PalettePatch.Load();
             ClassInjector.RegisterTypeInIl2Cpp<RainbowBehaviour>();
             ClassInjector.RegisterTypeInIl2Cpp<CrimeScene>();
@@ -252,9 +260,8 @@ namespace TownOfUs
             ServerManager.DefaultRegions = new Il2CppReferenceArray<IRegionInfo>(new IRegionInfo[0]);
         }
 
-        public static Sprite CreateSprite(string name)
+        public static Sprite CreateSprite(string name, float ppU = 100f)
         {
-            var pixelsPerUnit = 100f;
             var pivot = new Vector2(0.5f, 0.5f);
 
             var assembly = Assembly.GetExecutingAssembly();
@@ -263,7 +270,7 @@ namespace TownOfUs
             var img = imageStream.ReadFully();
             LoadImage(tex, img, true);
             tex.DontDestroy();
-            var sprite = Sprite.Create(tex, new Rect(0.0f, 0.0f, tex.width, tex.height), pivot, pixelsPerUnit);
+            var sprite = Sprite.Create(tex, new Rect(0.0f, 0.0f, tex.width, tex.height), pivot, ppU);
             sprite.DontDestroy();
             return sprite;
         }
