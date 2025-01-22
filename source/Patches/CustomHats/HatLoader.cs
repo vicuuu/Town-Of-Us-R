@@ -1,66 +1,104 @@
-using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Reflection;
-using BepInEx.Logging;
-using Reactor.Utilities;
-using System.Linq;
-using UnityEngine.AddressableAssets;
+using System.IO;
+using System.Text.Json;
+using BepInEx.Unity.IL2CPP.Utils;
+using Il2CppInterop.Runtime.Attributes;
+using UnityEngine;
+using UnityEngine.Networking;
+using static TownOfUs.CustomHats.CustomHatManager;
 
-namespace TownOfUs.Patches.CustomHats
+namespace TownOfUs.CustomHats;
+
+public class HatsLoader : MonoBehaviour
 {
-    internal static class HatLoader
+    private bool isRunning;
+
+    public void FetchHats()
     {
-        private static ManualLogSource Log => PluginSingleton<TownOfUs>.Instance.Log;
-        private static Assembly Assembly => typeof(TownOfUs).Assembly;
+        if (isRunning) return;
+        this.StartCoroutine(CoFetchHats());
+    }
 
-        private static bool LoadedHats = false;
+    [HideFromIl2Cpp]
+    private IEnumerator CoFetchHats()
+    {
+        isRunning = true;
+        var www = new UnityWebRequest();
+        www.SetMethod(UnityWebRequest.UnityWebRequestMethod.Get);
+        TownOfUs.Logger.LogMessage($"Download manifest at: {RepositoryUrl}/{ManifestFileName}");
+        www.SetUrl($"{RepositoryUrl}/{ManifestFileName}");
+        www.downloadHandler = new DownloadHandlerBuffer();
+        var operation = www.SendWebRequest();
 
-        internal static void LoadHatsRoutine()
+        while (!operation.isDone)
         {
-            if (LoadedHats || !DestroyableSingleton<HatManager>.InstanceExists || DestroyableSingleton<HatManager>.Instance.allHats.Count == 0)
-                return;
-            LoadedHats = true;
-            Coroutines.Start(LoadHats());
+            yield return new WaitForEndOfFrame();
         }
 
-        internal static IEnumerator LoadHats()
+        if (www.isNetworkError || www.isHttpError)
         {
-            
-            try
+            TownOfUs.Logger.LogError(www.error);
+            yield break;
+        }
+
+        var response = JsonSerializer.Deserialize<SkinsConfigFile>(www.downloadHandler.text, new JsonSerializerOptions
+        {
+            AllowTrailingCommas = true
+        });
+        www.downloadHandler.Dispose();
+        www.Dispose();
+
+        if (!Directory.Exists(HatsDirectory)) Directory.CreateDirectory(HatsDirectory);
+
+        UnregisteredHats.AddRange(SanitizeHats(response));
+        var toDownload = GenerateDownloadList(UnregisteredHats);
+
+        TownOfUs.Logger.LogMessage($"I'll download {toDownload.Count} hat files");
+
+        foreach (var fileName in toDownload)
+        {
+            yield return CoDownloadHatAsset(fileName);
+        }
+
+        isRunning = false;
+    }
+
+    private static IEnumerator CoDownloadHatAsset(string fileName)
+    {
+        var www = new UnityWebRequest();
+        www.SetMethod(UnityWebRequest.UnityWebRequestMethod.Get);
+        fileName = fileName.Replace(" ", "%20");
+        TownOfUs.Logger.LogMessage($"downloading hat: {fileName}");
+        www.SetUrl($"{RepositoryUrl}/hats/{fileName}");
+        www.downloadHandler = new DownloadHandlerBuffer();
+        var operation = www.SendWebRequest();
+
+        while (!operation.isDone)
+        {
+            yield return new WaitForEndOfFrame();
+        }
+
+        if (www.isNetworkError || www.isHttpError)
+        {
+            TownOfUs.Logger.LogError(www.error);
+            yield break;
+        }
+
+        var filePath = Path.Combine(HatsDirectory, fileName);
+        filePath = filePath.Replace("%20", " ");
+        var persistTask = File.WriteAllBytesAsync(filePath, www.downloadHandler.data);
+        while (!persistTask.IsCompleted)
+        {
+            if (persistTask.Exception != null)
             {
-                var hatBehaviours = DiscoverHatBehaviours();
-
-                var hatData = new List<HatData>();
-                hatData.AddRange(DestroyableSingleton<HatManager>.Instance.allHats);
-                hatData.ForEach((Action<HatData>)(x => x.StoreName = "Vanilla"));
-
-                var originalCount = DestroyableSingleton<HatManager>.Instance.allHats.ToList().Count;
-                hatBehaviours.Reverse();
-                for (var i = 0; i < hatBehaviours.Count; i++)
-                {
-                    hatBehaviours[i].displayOrder = originalCount + i;
-                    hatData.Add(hatBehaviours[i]);
-                }
-                DestroyableSingleton<HatManager>.Instance.allHats = hatData.ToArray();
+                TownOfUs.Logger.LogError(persistTask.Exception.Message);
+                break;
             }
-            catch (Exception e)
-            {
-                Log.LogError($"Error while loading hats: {e.Message}\nStack: {e.StackTrace}");
-            }
-            yield return null;
+
+            yield return new WaitForEndOfFrame();
         }
 
-        private static List<HatData> DiscoverHatBehaviours()
-        {
-            var hatBehaviours = new List<HatData>();
-            var path = TownOfUs.RuntimeLocation + "\\touhats.catalog";
-            Addressables.AddResourceLocator(Addressables.LoadContentCatalog(path).WaitForCompletion());
-            var all_hat_locations = Addressables.LoadResourceLocationsAsync("touhats").WaitForCompletion();
-            var assets = Addressables.LoadAssetsAsync<HatData>(all_hat_locations, null, false).WaitForCompletion();
-            var array = new Il2CppSystem.Collections.Generic.List<HatData>(assets.Pointer);
-            hatBehaviours.AddRange(array.ToArray());
-            return hatBehaviours;
-        }
+        www.downloadHandler.Dispose();
+        www.Dispose();
     }
 }
