@@ -12,6 +12,7 @@
         <GameVersion Condition="'$(GamePlatform)' == 'Itch'">2024.10.29</GameVersion>
 
         <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>
