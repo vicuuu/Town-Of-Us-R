@@ -1,4 +1,4 @@
-﻿using HarmonyLib;
+using HarmonyLib;
 using Hazel;
 using System;
 using System.Collections;
@@ -22,11 +22,14 @@ using TownOfUs.CrewmateRoles.TrapperMod;
 using TownOfUs.ImpostorRoles.BomberMod;
 using Reactor.Networking;
 using Reactor.Networking.Extensions;
+using System.Reflection;
+using System.IO;
 using TownOfUs.CrewmateRoles.DetectiveMod;
 using TownOfUs.NeutralRoles.SoulCollectorMod;
 using static TownOfUs.Roles.Glitch;
 using TownOfUs.Patches.NeutralRoles;
 using Il2CppSystem.Linq;
+using InnerNet;
 
 namespace TownOfUs
 {
@@ -187,6 +190,10 @@ namespace TownOfUs
         public static bool Is(this PlayerControl player, Faction faction)
         {
             return Role.GetRole(player)?.Faction == faction;
+        }
+        public static float KillDistance()
+        {
+            return GameOptionsData.KillDistances[GameOptionsManager.Instance.currentNormalGameOptions.KillDistance];
         }
 
         public static List<PlayerControl> GetCrewmates(List<PlayerControl> impostors)
@@ -653,7 +660,7 @@ namespace TownOfUs
         )
         {
             if (float.IsNaN(maxDistance))
-                maxDistance = GameOptionsData.KillDistances[GameOptionsManager.Instance.currentNormalGameOptions.KillDistance];
+                maxDistance = KillDistance();
             var player = GetClosestPlayer(
                 PlayerControl.LocalPlayer,
                 targets ?? PlayerControl.AllPlayerControls.ToArray().ToList()
@@ -1596,6 +1603,75 @@ namespace TownOfUs
                 undertaker.CurrentlyDragging = null;
             }
             #endregion
+        }
+
+        //#endregion
+
+        public static Dictionary<string, Sprite> CachedSprites = new();
+        public static Sprite LoadSpriteFromResources(string path, float pixelsPerUnit, bool cache = true)
+        {
+            try
+            {
+                if (cache && CachedSprites.TryGetValue(path + pixelsPerUnit, out var sprite)) return sprite;
+                Texture2D texture = LoadTextureFromResources(path);
+                sprite = Sprite.Create(texture, new UnityEngine.Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f), pixelsPerUnit);
+                if (cache) sprite.hideFlags |= HideFlags.HideAndDontSave | HideFlags.DontSaveInEditor;
+                if (!cache) return sprite;
+                return CachedSprites[path + pixelsPerUnit] = sprite;
+            }
+            catch
+            {
+                TownOfUs.Logger.LogError("Error loading sprite from path: " + path);
+            }
+            return null;
+        }
+
+        public static unsafe Texture2D LoadTextureFromResources(string path)
+        {
+            try
+            {
+                Texture2D texture = new Texture2D(2, 2, TextureFormat.ARGB32, true);
+                Assembly assembly = Assembly.GetExecutingAssembly();
+                Stream stream = assembly.GetManifestResourceStream(path);
+                var length = stream.Length;
+                var byteTexture = new Il2CppStructArray<byte>(length);
+                stream.Read(new Span<byte>((byte*)byteTexture.Pointer + IntPtr.Size * 4, (int)length));
+                ImageConversion.LoadImage(texture, byteTexture, false);
+                return texture;
+            }
+            catch
+            {
+                TownOfUs.Logger.LogError("Error loading texture from resources: " + path);
+            }
+            return null;
+        }
+
+        public static Texture2D loadTextureFromDisk(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    Texture2D texture = new Texture2D(2, 2, TextureFormat.ARGB32, true);
+                    var byteTexture = Il2CppSystem.IO.File.ReadAllBytes(path);
+                    ImageConversion.LoadImage(texture, byteTexture, false);
+                    return texture;
+                }
+            }
+            catch
+            {
+                TownOfUs.Logger.LogError("Error loading texture from disk: " + path);
+            }
+            return null;
+        }
+
+        public static bool IsTooFar(PlayerControl player, PlayerControl target)
+        {
+            if (player == null || target == null || (player == null && target == null))
+                return true;
+
+            var maxDistance = KillDistance();
+            return (GetDistBetweenPlayers(player, target) > maxDistance);
         }
     }
 }
